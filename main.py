@@ -4,10 +4,16 @@ from datetime import datetime
 import json
 from zoneinfo import ZoneInfo
 
-def unix_to_iso(unix_ts):
+def unix_to_iso(unix_ts, tz: ZoneInfo):
     if unix_ts is not None:
-        dt = datetime.fromtimestamp(unix_ts)
-        return dt.isoformat() + 'Z'
+        dt = datetime.fromtimestamp(unix_ts, tz)
+        offset = dt.utcoffset()
+        total_seconds = int(offset.total_seconds())
+        sign = '+' if total_seconds >= 0 else '-'
+        hours = abs(total_seconds) // 3600
+        minutes = abs(total_seconds) % 3600 // 60
+        suffix = f"{sign}{hours:02d}:{minutes:02d}"
+        return dt.isoformat() + 'Z' + suffix
     return ''
 
 
@@ -37,6 +43,9 @@ def are_there_any_flights_for_me_today(source: str, destination: str):
         if airport_code == source:
             found = True
             
+            # Flight status
+            status = fl['status']['text']
+
             origin_tz = fl['airport']['origin']['timezone']['name']
             origin_tz_obj = ZoneInfo(origin_tz)
             dst_tz = fl['airport']['destination']['timezone']['name']
@@ -45,16 +54,18 @@ def are_there_any_flights_for_me_today(source: str, destination: str):
             now_arr = datetime.now(dst_tz_obj)
             timediff_dep = fl['time']['scheduled']['departure'] - now_dep.timestamp()
             delta_dep = timestamp_to_hms(timediff_dep, True)
-            timediff_arr = fl['time']['scheduled']['arrival'] - now_arr.timestamp()
+            if est_arr := fl['time']['estimated']['arrival']:
+                timediff_arr = fl['time']['estimated']['arrival'] - now_arr.timestamp()
+            else:
+                timediff_arr = fl['time']['scheduled']['arrival'] - now_arr.timestamp()
             delta_arr = timestamp_to_hms(timediff_arr, False)
 
             airline = fl['airline']['name']
             flight_number = fl['identification']['number']['default']
             # Arrives at destination at
-            scheduled = unix_to_iso(fl['time']['scheduled']['arrival'])
-            estimated = unix_to_iso(fl['time']['estimated']['arrival'])
-            # Flight status
-            status = fl['status']['text']
+            scheduled = unix_to_iso(fl['time']['scheduled']['arrival'], tz=origin_tz_obj)
+            estimated = unix_to_iso(fl['time']['estimated']['arrival'], tz=dst_tz_obj)
+
 
             print('='*50 + 'FLIGHT INFO' + '='*50)
             if status and estimated:
